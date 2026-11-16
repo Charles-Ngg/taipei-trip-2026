@@ -470,12 +470,8 @@ main {
 .sf-mark.is-want { background: var(--want-bg); color: var(--want-ink); }
 .sf-mark.is-done { background: var(--done-bg); color: var(--done-ink); }
 .sf-item .icon-btn .i, .stop-food .icon-btn .i { color: var(--accent); }
-.sf-item.sf-cand { margin-left: 14px; padding-left: 12px; border-left: 2px solid var(--line-strong); }
-.sf-item.sf-cand + .sf-item.sf-cand { border-top: 0; }
-.sf-cand-label { font-size: 12px; font-weight: 700; color: var(--muted); }
 .sf-name { flex-wrap: wrap; }
 .sf-tbc { padding: 2px 7px; font-size: 11.5px; }
-.fc-cands { margin: 0; font-size: 14px; color: var(--ink-2); }
 
 
 /* runner / cheer split */
@@ -583,7 +579,7 @@ main {
 .fc-facts div { display: grid; grid-template-columns: 4.6em minmax(0, 1fr); gap: 8px; }
 .fc-facts dt { font-size: 14px; color: var(--muted); font-weight: 700; }
 .fc-facts dd { margin: 0; font-size: 15px; min-width: 0; }
-.fc-facts dd a, .fc-cands a, .kv dd a {
+.fc-facts dd a, .kv dd a {
   display: inline-flex; align-items: center; min-height: 44px;
   color: var(--accent); font-weight: 700; text-underline-offset: 3px;
 }

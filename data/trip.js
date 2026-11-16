@@ -38,7 +38,6 @@
        order: '必食', price: '', hours: '', closed: '', address: '', phone: '',
        notes: '', map: '店名 地址', tbc: '要確認咩',
        // 某一格資料未確認，就喺嗰格寫埋「待確認」，例如 hours: '11:00–21:00（待確認）'
-       candidateOf: 'jiufen-taro',   // （少用）係另一間嘅候選店
      },
 
    【加清單項目】喺 checklist 對應組別嘅 items 加：
@@ -576,12 +575,7 @@ window.TRIP = {
     },
     // 12/21 九份
     {
-      id: 'jiufen-taro', name: '九份芋圓創始店', area: '九份', stop: 'd4-jiufen', pick: 'organiser',
-      notes: '「創始店」未能對應到一間特定店舖。兩間候選：阿柑姨芋圓（豎崎路，有景觀座位，要行樓梯）同賴阿婆芋圓（基山街，唔使爬樓梯，待確認）。',
-      map: '九份芋圓', tbc: '請主辦人確認係邊一間（有招牌相或地圖連結就可以定案）',
-    },
-    {
-      id: 'a-gan-yi', name: '阿柑姨芋圓', area: '九份', stop: 'd4-jiufen', pick: 'suggested', candidateOf: 'jiufen-taro',
+      id: 'a-gan-yi', name: '阿柑姨芋圓', area: '九份', stop: 'd4-jiufen', pick: 'organiser',
       order: '綜合芋圓（冰或熱）', price: '約 NT$60／碗（食記，待確認）',
       hours: '週一至五 09:00–20:30；週六 09:00–21:30；週日 09:00–21:00', closed: '冇列固定休息日',
       address: '新北市瑞芳區豎崎路5號', phone: '02-2497-6505',
@@ -589,7 +583,7 @@ window.TRIP = {
       map: '阿柑姨芋圓 豎崎路5號', tbc: '價錢及付款方式',
     },
     {
-      id: 'lai-a-po', name: '賴阿婆芋圓', area: '九份', stop: 'd4-jiufen', pick: 'suggested', candidateOf: 'jiufen-taro',
+      id: 'lai-a-po', name: '賴阿婆芋圓', area: '九份', stop: 'd4-jiufen', pick: 'suggested',
       order: '五色綜合芋圓（冰或熱，食記，待確認）', price: '各來源價錢唔一致，現場睇價錢牌（待確認）',
       hours: '每日 08:00–20:00', closed: '冇列固定休息日',
       address: '新北市瑞芳區基山街143號', phone: '02-2497-5245',

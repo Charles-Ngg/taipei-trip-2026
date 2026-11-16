@@ -9,7 +9,7 @@
    All paths are relative to this file, so it works at "/" and at a sub-path
    such as "/taipei-trip-2026/".
    ========================================================================== */
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const CACHE_PREFIX = 'taipei-trip-';
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
 

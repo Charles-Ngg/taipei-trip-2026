@@ -173,14 +173,6 @@
       var da = a._day == null ? 99 : a._day, db = b._day == null ? 99 : b._day;
       return da - db || (a._stop ? a._stop._start : 9999) - (b._stop ? b._stop._start : 9999) || a._order - b._order;
     });
-    var foodById = {};
-    food.forEach(function (f) { foodById[f._id] = f; f._cands = []; });
-    food.forEach(function (f) {
-      if (!f.candidateOf) return;
-      var parent = foodById[f.candidateOf];
-      if (!parent) { warn('美食「' + f.name + '」嘅 candidateOf 搵唔到：', f.candidateOf); return; }
-      f._parent = parent; parent._cands.push(f);
-    });
     var foodByStop = {};
     food.forEach(function (f) { if (f._stop) (foodByStop[f._stop._id] = foodByStop[f._stop._id] || []).push(f); });
 
@@ -442,21 +434,12 @@
 
   function foodInlineHTML(foods, heading) {
     var marks = foodMarks();
-    // candidates sit right under the entry they belong to
-    var ordered = [];
-    foods.forEach(function (f) {
-      if (f._parent && foods.indexOf(f._parent) >= 0) return;
-      ordered.push(f);
-      f._cands.forEach(function (c) { if (foods.indexOf(c) >= 0) ordered.push(c); });
-    });
     return '<div class="stop-food"><p class="sf-head">' + icon('bowl') + esc(heading) + '</p><ul>' +
-      ordered.map(function (f) {
+      foods.map(function (f) {
         var mk = marks[f._id];
         var m = mapList(f.map, f.name)[0];
-        var cand = f._parent && foods.indexOf(f._parent) >= 0;
-        return '<li class="sf-item' + (cand ? ' sf-cand' : '') + '" data-food-id="' + esc(f._id) + '">' +
+        return '<li class="sf-item" data-food-id="' + esc(f._id) + '">' +
           '<a class="sf-main" href="#food/' + encodeURIComponent(f._id) + '">' +
-            (cand ? '<span class="sf-cand-label">候選</span>' : '') +
             '<span class="sf-name">' + esc(f.name) + (f._pick === 'organiser' ? icon('star', 'sf-star') : '') +
             (hasTbc(f) ? tag('tag-tbc sf-tbc', '待確認') : '') + '</span>' +
             (f.order ? '<span class="sf-order">' + rich(f.order) + '</span>' : '') +
@@ -608,10 +591,6 @@
       (f._pick === 'organiser' ? tag('tag-pick', icon('star') + '主辦推介') : tag('tag-suggest', '建議')) + '</header>' +
       (meta.length ? '<p class="fc-meta">' + meta.join(' · ') + '</p>' : '') +
       (facts.length ? '<dl class="fc-facts">' + facts.map(function (x) { return '<div><dt>' + x[0] + '</dt><dd>' + x[1] + '</dd></div>'; }).join('') + '</dl>' : '') +
-      (f._cands.length ? '<p class="fc-cands">候選（' + rich('待確認') + '）：' + f._cands.map(function (c) {
-        return '<a href="#food/' + encodeURIComponent(c._id) + '">' + esc(c.name) + '</a>';
-      }).join('、') + '</p>' : '') +
-      (f._parent ? '<p class="fc-cands">主辦推介「<a href="#food/' + encodeURIComponent(f._parent._id) + '">' + esc(f._parent.name) + '</a>」嘅候選之一（' + rich('待確認') + '）</p>' : '') +
       (f.notes ? '<p class="fc-notes">' + rich(f.notes) + '</p>' : '') +
       (hasTbc(f) ? '<div class="tags">' + tag('tag-tbc', '待確認') + '</div>' + tbcBlock(f.tbc) : '') +
       link +
