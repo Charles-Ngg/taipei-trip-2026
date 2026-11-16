@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-Hant-HK">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#F5EFE6" media="(prefers-color-scheme: light)" data-default="#F5EFE6">
+  <meta name="theme-color" content="#12161D" media="(prefers-color-scheme: dark)" data-default="#12161D">
+  <!-- App name for home-screen install (keep in sync with manifest.webmanifest) -->
+  <title>台北 2026</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="台北 2026">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="assets/style.css">
+  <script>
+    /* Apply saved theme before first paint (avoids a light/dark flash). */
+    try {
+      var t = JSON.parse(localStorage.getItem('tpe26:theme'));
+      if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <div class="statusbar-fill" aria-hidden="true"></div>
+  <div class="netbar" id="netbar" role="status" hidden></div>
+
+  <div class="shell">
+    <div class="side">
+      <header class="masthead">
+        <a class="brand" id="brand" href="#itinerary" aria-label="返去行程"></a>
+        <button class="icon-btn theme-btn" id="theme-btn" type="button" data-theme-toggle></button>
+      </header>
+
+      <nav class="tabbar" aria-label="主選單">
+        <a class="tab" href="#itinerary" data-tab="itinerary">
+          <svg class="i" aria-hidden="true"><use href="#i-route"></use></svg><span>行程</span>
+        </a>
+        <a class="tab" href="#food" data-tab="food">
+          <svg class="i" aria-hidden="true"><use href="#i-bowl"></use></svg><span>美食</span>
+        </a>
+        <a class="tab" href="#checklist" data-tab="checklist">
+          <svg class="i" aria-hidden="true"><use href="#i-checklist"></use></svg><span>清單</span>
+        </a>
+        <a class="tab" href="#info" data-tab="info">
+          <svg class="i" aria-hidden="true"><use href="#i-info"></use></svg><span>資訊</span>
+        </a>
+      </nav>
+
+      <div class="side-status" data-status aria-live="polite"></div>
+      <p class="side-foot" id="side-foot"></p>
+    </div>
+
+    <main id="main" tabindex="-1">
+      <noscript><p class="fatal">呢個網站需要開啟 JavaScript。</p></noscript>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <div class="overlay" id="overlay" hidden></div>
+  <div id="print-root" aria-hidden="true"></div>
+
+  <script src="data/trip.js"></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>
