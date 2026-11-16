@@ -439,8 +439,11 @@ main {
 .stop.is-current .dot { box-shadow: 0 0 0 4px var(--bg), 0 0 0 6.5px var(--accent); }
 .stop.is-next .live-badge { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .stop.is-next .stop-card { border-color: var(--line-strong); }
-.stop.is-past .stop-card { opacity: 0.6; }
-.stop.is-past .dot { opacity: 0.55; }
+/* past stops keep full-contrast text and buttons; "done" is shown by a hollow dot and an 已過 badge */
+.stop.is-past .dot { background: var(--surface); color: var(--tc, var(--muted)); box-shadow: 0 0 0 4px var(--bg), inset 0 0 0 2px var(--tc, var(--muted)); }
+.lane .stop.is-past .dot { box-shadow: 0 0 0 3px var(--bg-2), inset 0 0 0 2px var(--tc, var(--muted)); }
+.stop.is-past .live-badge { background: var(--bg-2); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.stop.is-past .stop-card { box-shadow: none; }
 
 .flash { animation: flash 1.4s ease-out; }
 @keyframes flash { 0%, 30% { box-shadow: 0 0 0 3px var(--gold); } 100% { box-shadow: 0 0 0 0 transparent; } }
@@ -470,6 +473,8 @@ main {
 .sf-item.sf-cand { margin-left: 14px; padding-left: 12px; border-left: 2px solid var(--line-strong); }
 .sf-item.sf-cand + .sf-item.sf-cand { border-top: 0; }
 .sf-cand-label { font-size: 12px; font-weight: 700; color: var(--muted); }
+.sf-name { flex-wrap: wrap; }
+.sf-tbc { padding: 2px 7px; font-size: 11.5px; }
 .fc-cands { margin: 0; font-size: 14px; color: var(--ink-2); }
 
 
@@ -867,5 +872,8 @@ main {
   #print-root td { vertical-align: top; padding: 4pt 6pt 4pt 0; border-bottom: 0.5pt solid #BBBBBB; }
   .p-time { width: 8em; font-weight: 700; white-space: nowrap; }
   .p-meta { font-size: 9.5pt; color: #444444; }
+  .p-suggest td { color: #333333; }
+  .p-sugg { margin: 6pt 0 0; padding: 4pt 6pt; border: 0.75pt dashed #888888; font-size: 9.5pt; break-inside: avoid; }
+  .p-sugg p { margin: 2pt 0; }
   #print-root td div, .p-rem { white-space: pre-line; }
 }

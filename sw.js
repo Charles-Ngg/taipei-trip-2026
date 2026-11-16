@@ -9,7 +9,7 @@
    All paths are relative to this file, so it works at "/" and at a sub-path
    such as "/taipei-trip-2026/".
    ========================================================================== */
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE_PREFIX = 'taipei-trip-';
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
 
@@ -66,14 +66,6 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(staleWhileRevalidate(event, key));
 });
 
-self.addEventListener('message', (event) => {
-  const data = event.data || {};
-  if (data.type === 'check') {
-    // The page came back to the foreground: look for a newer trip.js.
-    event.waitUntil(refresh(DATA_URL).then((r) => (r.changed ? notify('data-updated') : null)).catch(() => {}));
-  }
-});
-
 /* ---------------------------------------------------------------- helpers */
 
 function isText(res) {
@@ -109,14 +101,13 @@ async function notify(type) {
 }
 
 // Trip data: prefer the network (so itinerary edits show up straight away), fall back to the
-// saved copy when offline or slow; if the network answers late with new data, tell the page.
+// saved copy when offline or slow. Whenever a newer trip.js is saved, every open page and the
+// installed app are told; each page then compares the data it is showing and refreshes if needed.
 async function networkFirst(event, key) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(key);
-  let servedSaved = false;
   const net = refresh(key);
-  // keep the worker alive until the fresh copy is stored (and the page told, if it got the old one)
-  event.waitUntil(net.then((r) => (servedSaved && r.changed ? notify('data-updated') : null)).catch(() => {}));
+  event.waitUntil(net.then((r) => (r.changed ? notify('data-updated') : null)).catch(() => {}));
   if (!cached) return net.then((r) => r.res);
 
   return new Promise((resolve) => {
@@ -124,7 +115,6 @@ async function networkFirst(event, key) {
     const useSaved = () => {
       if (settled) return;
       settled = true;
-      servedSaved = true;
       clearTimeout(timer);
       resolve(cached);
     };

@@ -126,10 +126,14 @@
         last = start;
         var type = TYPES[it.type] ? it.type : 'sight';
         if (!TYPES[it.type]) warn(d.date + '「' + it.title + '」type 唔認得：', it.type);
+        var end = parseHM(it.end);
         var o = Object.assign({}, it, {
           _id: String(it.id || ('d' + (di + 1) + '-' + (ii + 1))),
           _start: start,
-          _end: parseHM(it.end),
+          _end: end,
+          _startAbs: dateMs(d.date, start),
+          // an end at or before the start means the item runs past midnight
+          _endAbs: end == null ? null : dateMs(d.date, end) + (end <= start ? 24 * 3600 * 1000 : 0),
           _type: type,
           _group: it.group === 'runner' || it.group === 'cheer' ? it.group : 'all',
           _day: di,
@@ -180,7 +184,34 @@
     var foodByStop = {};
     food.forEach(function (f) { if (f._stop) (foodByStop[f._stop._id] = foodByStop[f._stop._id] || []).push(f); });
 
-    D = { T: T, days: days, food: food, foodByStop: foodByStop, stops: stops };
+    var all = [];
+    days.forEach(function (d) { all = all.concat(d.items); });
+    all.sort(function (a, b) { return a._startAbs - b._startAbs || a._day - b._day || a._order - b._order; });
+
+    // checklist: every item is stored by its permanent id (text and group names can change freely)
+    var seenIds = {};
+    var checklist = arr(T.checklist).map(function (g, gi) {
+      var gname = g.group || g.title || ('第 ' + (gi + 1) + ' 組');
+      var items = arr(g.items).map(function (x) { return typeof x === 'string' ? { text: x } : x; })
+        .filter(function (x) { return x && x.text; })
+        .map(function (x) {
+          var key = x.id ? String(x.id) : 'text:' + gname + '/' + x.text;
+          if (!x.id) warn('清單項目冇 id（改文字會清走剔號），請加一個：', x.text);
+          else if (seenIds[key]) warn('清單 id 重複：', key);
+          seenIds[key] = 1;
+          return Object.assign({}, x, { _key: key, _legacy: gname + '/' + x.text });
+        });
+      return { name: gname, items: items };
+    });
+
+    D = { T: T, days: days, all: all, food: food, foodByStop: foodByStop, stops: stops, checklist: checklist, rev: revOf(T) };
+  }
+
+  // Fingerprint of the trip data, so an open page can tell whether it is showing the newest version.
+  function revOf(obj) {
+    var s = JSON.stringify(obj) || '', h = 2166136261;
+    for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return (h >>> 0).toString(36) + '.' + s.length;
   }
 
   // ------------------------------------------------------------ state
@@ -193,16 +224,26 @@
   };
 
   // ------------------------------------------------------------ now / next
-  function laneLive(day, lane, min) {
-    var items = day.items.filter(function (x) { return x._group === 'all' || x._group === lane; });
+  // All comparisons use absolute timestamps (Taipei time), so an item such as
+  // 23:00–01:00 stays "current" across midnight and is still shown the next morning.
+  function laneLive(lane, now, todayDate) {
+    var items = D.all.filter(function (x) { return x._group === 'all' || x._group === lane; });
+    var dayEnd = todayDate ? dateMs(todayDate, 24 * 60) : -Infinity;
     var current = null, next = null, past = [];
     for (var i = 0; i < items.length; i++) {
       var it = items[i];
-      if (it._start <= min) {
-        if (current) past.push(current);
-        current = it._end == null || min < it._end ? it : null;
-        if (!current) past.push(it);
-      } else { next = it; break; }
+      if (it._startAbs <= now) {
+        // no explicit end: runs until the next item in this lane starts, but never past its own day
+        var end = it._endAbs;
+        if (end == null) {
+          end = dateMs(D.days[it._day].date, 24 * 60);
+          if (items[i + 1]) end = Math.min(end, items[i + 1]._startAbs);
+        }
+        if (now < end) { if (current) past.push(current); current = it; }
+        else past.push(it);
+      } else if (!next && it._startAbs < dayEnd) {
+        next = it; // only today's upcoming items; later days get a "聽日" line instead
+      }
     }
     return { current: current, next: next, past: past };
   }
@@ -210,18 +251,16 @@
   function live() {
     var now = nowMs(), t = tpe(now);
     var days = D.days, first = days[0], last = days[days.length - 1];
-    var L = { now: now, t: t, todayIdx: -1 };
-    if (t.date < first.date) L.phase = 'before';
-    else if (t.date > last.date) L.phase = 'after';
-    else L.phase = 'during';
+    var L = { now: now, t: t, todayIdx: -1, lanes: {} };
     for (var i = 0; i < days.length; i++) if (days[i].date === t.date) L.todayIdx = i;
+    LANES.forEach(function (g) { L.lanes[g] = laneLive(g, now, L.todayIdx >= 0 ? t.date : null); });
+    var active = LANES.some(function (g) { return L.lanes[g].current; });
+    if (t.date < first.date && !active) L.phase = 'before';
+    else if (t.date > last.date && !active) L.phase = 'after';
+    else L.phase = 'during';
     if (L.phase === 'before') {
       L.targetItem = first.items[0] || null;
-      L.target = dateMs(first.date, L.targetItem ? L.targetItem._start : 0);
-    }
-    if (L.phase === 'during' && L.todayIdx >= 0) {
-      L.lanes = {};
-      LANES.forEach(function (g) { L.lanes[g] = laneLive(days[L.todayIdx], g, t.min); });
+      L.target = L.targetItem ? L.targetItem._startAbs : dateMs(first.date, 0);
     }
     return L;
   }
@@ -231,8 +270,9 @@
   function statusRow(it, kind, L) {
     var t = TYPES[it._type];
     var label = (kind === 'current' ? '而家' : '下一站') + ' · ' + esc(it.timeText || it.time);
+    if (it._day !== L.todayIdx) label += '（' + md(D.days[it._day].date) + ' 開始）';
     if (it._group !== 'all') label += ' · ' + esc(groupLabel(it._group));
-    if (kind === 'next' && it._day === L.todayIdx) label += ' · <span class="sr-eta">仲有 ' + duration(it._start - L.t.min) + '</span>';
+    if (kind === 'next') label += ' · <span class="sr-eta">仲有 ' + duration((it._startAbs - L.now) / 60000) + '</span>';
     return '<button type="button" class="status-row is-' + kind + '" data-jump="' + esc(it._id) + '">' +
       '<span class="dot dot-sm" data-type="' + it._type + '">' + icon(t.icon) + '</span>' +
       '<span class="sr-body"><span class="sr-label">' + label + '</span>' +
@@ -261,19 +301,20 @@
     }
     var head = '<p class="status-kicker"><span class="pulse" aria-hidden="true"></span>而家 ' + L.t.hm +
       (L.todayIdx >= 0 ? ' · 第 ' + (L.todayIdx + 1) + ' 日 ' + md(days[L.todayIdx].date) + '（' + weekday(days[L.todayIdx].date) + '）' : '') + '</p>';
-    if (L.todayIdx < 0) return '<div class="status status-live">' + head + '</div>';
-
     var shown = lanesShown();
     var cur = uniq(shown.map(function (g) { return L.lanes[g].current; }));
     var nxt = uniq(shown.map(function (g) { return L.lanes[g].next; }));
     var rows = cur.map(function (x) { return statusRow(x, 'current', L); });
-    if (!cur.length) rows.push('<p class="status-gap">' + (nxt.length ? '移動中／自由時間' : '今日行程已完成') + '</p>');
+    var startedToday = L.todayIdx >= 0 && days[L.todayIdx].items.some(function (x) {
+      return (x._group === 'all' || shown.indexOf(x._group) >= 0) && x._startAbs <= L.now;
+    });
+    if (!cur.length) rows.push('<p class="status-gap">' + (!nxt.length ? '今日行程已完成' : startedToday ? '移動中／自由時間' : '今日行程未開始') + '</p>');
     rows = rows.concat(nxt.map(function (x) { return statusRow(x, 'next', L); }));
-    if (!nxt.length && L.todayIdx < days.length - 1) {
+    if (!nxt.length && L.todayIdx >= 0 && L.todayIdx < days.length - 1) {
       var tmr = days[L.todayIdx + 1].items.filter(function (x) { return x._group === 'all' || shown.indexOf(x._group) >= 0; })[0];
       if (tmr) rows.push('<p class="status-gap">聽日 ' + esc(tmr.time) + ' · ' + esc(tmr.title) + '</p>');
     }
-    var back = state.tab === 'itinerary' && state.day !== L.todayIdx
+    var back = state.tab === 'itinerary' && L.todayIdx >= 0 && state.day !== L.todayIdx
       ? '<button type="button" class="btn btn-sm status-back" data-today>返去今日行程</button>' : '';
     return '<div class="status status-live">' + head + '<div class="status-rows">' + rows.join('') + '</div>' + back + '</div>';
   }
@@ -284,7 +325,7 @@
       var b = $('.live-badge', el);
       if (b) { b.hidden = true; b.textContent = ''; }
     });
-    if (state.tab !== 'itinerary' || L.phase !== 'during' || L.todayIdx !== state.day || !L.lanes) return;
+    if (state.tab !== 'itinerary' || L.phase !== 'during') return;
     var cur = {}, nxt = {}, past = {};
     lanesShown().forEach(function (g) {
       var ln = L.lanes[g];
@@ -292,11 +333,14 @@
       if (ln.next) nxt[ln.next._id] = 1;
       ln.past.forEach(function (x) { past[x._id] = 1; });
     });
+    // "已過" only on today's page (a previous day would be all 已過); current/next wherever they appear
+    var isToday = L.todayIdx === state.day;
     $$('.stop').forEach(function (el) {
       var id = el.getAttribute('data-id'), b = $('.live-badge', el);
-      if (cur[id]) { el.classList.add('is-current'); if (b) { b.hidden = false; b.textContent = '而家'; } }
-      else if (nxt[id]) { el.classList.add('is-next'); if (b) { b.hidden = false; b.textContent = '下一站'; } }
-      else if (past[id]) el.classList.add('is-past');
+      var mark = cur[id] ? ['is-current', '而家'] : nxt[id] ? ['is-next', '下一站'] : past[id] && isToday ? ['is-past', '已過'] : null;
+      if (!mark) return;
+      el.classList.add(mark[0]);
+      if (b) { b.hidden = false; b.textContent = mark[1]; }
     });
   }
 
@@ -312,10 +356,10 @@
       return;
     }
     lastToday = L.todayIdx;
-    var ids = L.lanes ? LANES.map(function (g) {
+    var ids = LANES.map(function (g) {
       var ln = L.lanes[g];
       return (ln.current ? ln.current._id : '-') + '>' + (ln.next ? ln.next._id : '-');
-    }).join(',') : '';
+    }).join(',');
     var sig = [L.phase, L.todayIdx, ids, Math.floor(L.now / 60000), state.group, state.day, state.tab].join('|');
     if (!force && sig === lastSig) return;
     lastSig = sig;
@@ -388,6 +432,14 @@
       '</article></li>';
   }
 
+  // a food entry is unconfirmed if it has a tbc reason or any field says 待確認
+  function hasTbc(f) {
+    if (f.tbc) return true;
+    return ['order', 'price', 'hours', 'closed', 'address', 'notes'].some(function (k) {
+      return typeof f[k] === 'string' && f[k].indexOf('待確認') >= 0;
+    });
+  }
+
   function foodInlineHTML(foods, heading) {
     var marks = foodMarks();
     // candidates sit right under the entry they belong to
@@ -404,9 +456,10 @@
         var cand = f._parent && foods.indexOf(f._parent) >= 0;
         return '<li class="sf-item' + (cand ? ' sf-cand' : '') + '" data-food-id="' + esc(f._id) + '">' +
           '<a class="sf-main" href="#food/' + encodeURIComponent(f._id) + '">' +
-            (cand ? '<span class="sf-cand-label">候選 ' + rich('待確認') + '</span>' : '') +
-            '<span class="sf-name">' + esc(f.name) + (f._pick === 'organiser' ? icon('star', 'sf-star') : '') + '</span>' +
-            (f.order ? '<span class="sf-order">' + rich(f.order) + '</span>' : (f.tbc ? '<span class="sf-order">' + rich('待確認') + '</span>' : '')) +
+            (cand ? '<span class="sf-cand-label">候選</span>' : '') +
+            '<span class="sf-name">' + esc(f.name) + (f._pick === 'organiser' ? icon('star', 'sf-star') : '') +
+            (hasTbc(f) ? tag('tag-tbc sf-tbc', '待確認') : '') + '</span>' +
+            (f.order ? '<span class="sf-order">' + rich(f.order) + '</span>' : '') +
           '</a>' +
           '<span class="sf-mark' + (mk ? ' is-' + mk : '') + '">' + (mk ? MARK_LABEL[mk] : '') + '</span>' +
           (m ? '<a class="icon-btn" href="' + esc(mapsUrl(m.q)) + '" target="_blank" rel="noopener" aria-label="導航：' + esc(f.name) + '">' + icon('nav') + '</a>' : '') +
@@ -560,7 +613,7 @@
       }).join('、') + '</p>' : '') +
       (f._parent ? '<p class="fc-cands">主辦推介「<a href="#food/' + encodeURIComponent(f._parent._id) + '">' + esc(f._parent.name) + '</a>」嘅候選之一（' + rich('待確認') + '）</p>' : '') +
       (f.notes ? '<p class="fc-notes">' + rich(f.notes) + '</p>' : '') +
-      (f.tbc ? '<div class="tags">' + tag('tag-tbc', '待確認') + '</div>' + tbcBlock(f.tbc) : '') +
+      (hasTbc(f) ? '<div class="tags">' + tag('tag-tbc', '待確認') + '</div>' + tbcBlock(f.tbc) : '') +
       link +
       '<footer class="fc-foot"><div class="marks" role="group" aria-label="標記">' +
         '<button type="button" class="mark mark-want" data-mark="want" data-food="' + esc(f._id) + '" aria-pressed="' + (mk === 'want') + '">' + icon('heart') + '想食</button>' +
@@ -569,19 +622,30 @@
   }
 
   // ------------------------------------------------------------ view: checklist
+  var CHECKS_KEY = 'checklist'; // { itemId: true }
+
   function checklistGroups() {
-    return arr(D.T.checklist).map(function (g, gi) {
-      var gname = g.group || g.title || ('第 ' + (gi + 1) + ' 組');
-      var items = arr(g.items).map(function (x) { return typeof x === 'string' ? { text: x } : x; })
-        .filter(function (x) { return x && x.text; })
-        .map(function (x) { return Object.assign({}, x, { _key: gname + '/' + (x.id || x.text) }); })
-        .filter(function (x) { return state.group === 'all' || !x.who || x.who === 'all' || x.who === state.group; });
-      return { name: gname, items: items };
+    return D.checklist.map(function (g) {
+      var items = g.items.filter(function (x) { return state.group === 'all' || !x.who || x.who === 'all' || x.who === state.group; });
+      return { name: g.name, items: items };
     }).filter(function (g) { return g.items.length; });
   }
 
+  function getChecks() { var c = store.get(CHECKS_KEY, {}); return c && typeof c === 'object' ? c : {}; }
+
+  // One-off: earlier versions stored ticks as "group name/item text"; move them onto item ids.
+  function migrateChecks() {
+    if (store.get(CHECKS_KEY, null) !== null) return;
+    var old = store.get('checks', null), next = {};
+    if (old && typeof old === 'object') {
+      D.checklist.forEach(function (g) { g.items.forEach(function (x) { if (old[x._legacy] || old[x._key]) next[x._key] = true; }); });
+    }
+    store.set(CHECKS_KEY, next);
+    if (old) store.set('checks', null);
+  }
+
   function renderChecklist() {
-    var checks = store.get('checks', {}) || {};
+    var checks = getChecks();
     var groups = checklistGroups();
     var total = 0, done = 0;
     groups.forEach(function (g) { g.items.forEach(function (x) { total++; if (checks[x._key]) done++; }); });
@@ -747,15 +811,19 @@
         arr(d.alerts).map(textOf).map(function (a) { return '<p class="p-rem"><b>' + esc(a.title || '注意') + '：</b>' + esc(a.text) + '</p>'; }).join('') +
         arr(d.reminders).map(function (r) { return '<p class="p-rem">提醒：' + esc(textOf(r).text) + '</p>'; }).join('') +
         '<table>' + d.items.map(function (it) {
-          var foods = (D.foodByStop[it._id] || []).map(function (f) { return esc(f.name); });
-          return '<tr><td class="p-time">' + esc(timeText(it)) + '</td><td><b>' + esc(it.title) + '</b>' +
+          var foods = (D.foodByStop[it._id] || []).map(function (f) { return esc(f.name) + (hasTbc(f) ? '（待確認）' : ''); });
+          return '<tr' + (it.source === 'suggested' ? ' class="p-suggest"' : '') + '><td class="p-time">' + esc(timeText(it)) + '</td><td><b>' + esc(it.title) + '</b>' +
+            (it.source === 'suggested' ? ' 〔建議・非主辦原定安排〕' : '') +
             (it._group !== 'all' ? ' 〔' + esc(groupLabel(it._group)) + '〕' : '') + (it.tbc ? ' 〔待確認〕' : '') +
             '<div class="p-meta">' + TYPES[it._type].label + (it.area ? ' · ' + esc(it.area) : '') + '</div>' +
             (it.route ? '<div>前往：' + esc(it.route) + '</div>' : '') +
             (it.notes ? '<div>' + esc(it.notes) + '</div>' : '') +
             (typeof it.tbc === 'string' ? '<div>待確認：' + esc(it.tbc) + '</div>' : '') +
             (foods.length ? '<div>美食：' + foods.join('、') + '</div>' : '') + '</td></tr>';
-        }).join('') + '</table></section>';
+        }).join('') + '</table>' +
+        (arr(d.suggestions).length ? '<div class="p-sugg"><b>研究建議（未納入行程，供參考）</b>' + arr(d.suggestions).map(function (s) {
+          s = textOf(s); return '<p>・' + esc(s.text) + (s.why ? '（' + esc(s.why) + '）' : '') + '</p>';
+        }).join('') + '</div>' : '') + '</section>';
     }).join('');
   }
 
@@ -914,24 +982,24 @@
       } else if (el.hasAttribute('data-theme-toggle')) cycleTheme();
       else if (el.hasAttribute('data-print')) { renderPrint(); window.print(); }
       else if (el.hasAttribute('data-reset-checks')) {
-        if (window.confirm('確定清除呢部裝置上所有剔號？')) { store.set('checks', {}); render(); }
+        if (window.confirm('確定清除呢部裝置上所有剔號？')) { store.set(CHECKS_KEY, {}); render(); }
       } else if (el.hasAttribute('data-today')) { var L = live(); if (L.todayIdx >= 0) setDay(L.todayIdx); }
     });
 
     document.addEventListener('change', function (e) {
       var box = e.target.closest('[data-check]');
       if (!box) return;
-      var checks = Object.assign({}, store.get('checks', {}) || {});
+      var checks = Object.assign({}, getChecks());
       var key = box.getAttribute('data-check');
       if (box.checked) checks[key] = true; else delete checks[key];
-      store.set('checks', checks);
+      store.set(CHECKS_KEY, checks);
       refreshCheckCounts();
     });
 
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeOverlay(); });
     window.addEventListener('hashchange', onHash);
     window.addEventListener('beforeprint', renderPrint);
-    window.addEventListener('online', updateNet);
+    window.addEventListener('online', function () { updateNet(); checkData(); });
     window.addEventListener('offline', updateNet);
     if (window.matchMedia) {
       var mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -944,37 +1012,45 @@
       checkForUpdates();
     });
     setInterval(function () { updateLive(false); }, 20000);
+    // while the page stays open and visible, look for a newer itinerary every 10 minutes
+    setInterval(function () { if (document.visibilityState === 'visible') checkData(); }, 10 * 60000);
   }
 
   // ------------------------------------------------------------ service worker + live content updates
   var swReg = null;
   function checkForUpdates() {
-    if (!('serviceWorker' in navigator)) return;
-    if (swReg) swReg.update().catch(function () {});
-    if (navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: 'check' });
+    if ('serviceWorker' in navigator && swReg) swReg.update().catch(function () {});
+    checkData();
   }
 
-  // Re-load data/trip.js in place (the service worker tells us when it changed).
-  var reloading = false;
-  function reloadData() {
-    if (reloading) return;
-    reloading = true;
-    fetch('data/trip.js', { cache: 'no-cache' }).then(function (r) {
+  // Make sure this page shows the newest trip data. The fetch goes through the service worker
+  // (fresh copy when online, newest saved copy otherwise — possibly saved by another tab or the
+  // installed app). We compare against what this page actually rendered, not network vs cache.
+  var checking = null;
+  function parseTrip(text) {
+    var sandbox = {};
+    (new Function('window', text))(sandbox); // trip.js assigns window.TRIP
+    return sandbox.TRIP;
+  }
+  function checkData() {
+    if (checking || !D) return checking;
+    checking = fetch('data/trip.js', { cache: 'no-cache' }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.text();
     }).then(function (text) {
+      var next = parseTrip(text);
+      if (!next || !Array.isArray(next.days) || revOf(next) === D.rev) return;
       var prev = window.TRIP;
-      var s = document.createElement('script');
-      s.textContent = text;
-      document.head.appendChild(s);
-      document.head.removeChild(s);
+      window.TRIP = next;
       try { prepare(); } catch (e) { window.TRIP = prev; prepare(); throw e; }
       if (state.day >= D.days.length) state.day = 0;
       var y = window.scrollY;
       render();
       window.scrollTo(0, y);
       toast('行程已更新');
-    }).catch(function (e) { console.warn('reload data failed', e); }).then(function () { reloading = false; });
+    }).catch(function (e) { console.warn('checking for new trip data failed', e); })
+      .then(function () { checking = null; });
+    return checking;
   }
 
   function registerSW() {
@@ -990,7 +1066,7 @@
     });
     navigator.serviceWorker.addEventListener('message', function (e) {
       var data = e.data || {};
-      if (data.type === 'data-updated') reloadData();
+      if (data.type === 'data-updated') checkData();
       else if (data.type === 'app-updated') toast('網站有新版本', '重新載入', function () { location.reload(); });
     });
     navigator.serviceWorker.register('sw.js').then(function (reg) {
@@ -1018,6 +1094,7 @@
     updateNet();
     registerSW();
     try { prepare(); } catch (e) { fatal(e); return; }
+    migrateChecks();
     var g = store.get('group', 'all');
     state.group = g === 'runner' || g === 'cheer' ? g : 'all';
     var L = live();
