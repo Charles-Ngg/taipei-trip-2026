@@ -33,7 +33,7 @@
   <div class="shell">
     <div class="side">
       <header class="masthead">
-        <a class="brand" id="brand" href="#itinerary" aria-label="返去行程"></a>
+        <a class="brand" id="brand" href="#itinerary"></a>
         <button class="icon-btn theme-btn" id="theme-btn" type="button" data-theme-toggle></button>
       </header>
 
@@ -52,7 +52,7 @@
         </a>
       </nav>
 
-      <div class="side-status" data-status aria-live="polite"></div>
+      <div class="side-status" data-status></div>
       <p class="side-foot" id="side-foot"></p>
     </div>
 
@@ -61,7 +61,12 @@
     </main>
   </div>
 
+  <!-- Screen-reader announcements (toast text, offline/online). Always rendered; visually hidden.
+       The toast and the offline bar keep their old role/aria-live for an older cached app.js;
+       the current app.js removes them and announces through #announcer instead. -->
+  <p class="visually-hidden" id="announcer" role="status" style="position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap"></p>
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <!-- Taxi card. app.js swaps this for a <dialog> where supported (kept as a div so an older cached app.js still works). -->
   <div class="overlay" id="overlay" hidden></div>
   <div id="print-root" aria-hidden="true"></div>
 

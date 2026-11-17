@@ -22,9 +22,10 @@
   --tabbar-bg: rgba(255, 252, 247, 0.94);
   --ink: #1D2230;
   --ink-2: #424958;
-  --muted: #646B78;
+  --muted: #5B6270; /* >= 4.5:1 on --bg, --bg-2 and --surface */
   --line: #E1D6C5;
   --line-strong: #CBBDA7;
+  --control-border: #857A69; /* unchecked tick-box outline, >= 3:1 on --surface */
   --rail: #D6C8B2;
   --accent: #B3312A;
   --accent-strong: #8F231D;
@@ -32,7 +33,7 @@
   --accent-soft: #F7E1DC;
   --jade: #1E6E5A;
   --jade-2: #2E8C72;
-  --gold: #C68A12;
+  --gold: #A87508; /* >= 3:1 on --surface (organiser star) */
   --tbc-bg: #FCEFC7;
   --tbc-ink: #6B4C00;
   --runner-soft: #FBE3E1; --runner-ink: #9E232A; --lane-runner: #C8323A;
@@ -57,7 +58,7 @@
     color-scheme: dark;
     --bg: #12161D; --bg-2: #181D26; --surface: #1D232E; --tabbar-bg: rgba(24, 29, 38, 0.94);
     --ink: #F2ECE2; --ink-2: #CFC8BC; --muted: #9EA4AE;
-    --line: #2C3441; --line-strong: #3E4858; --rail: #364050;
+    --line: #2C3441; --line-strong: #3E4858; --rail: #364050; --control-border: #7A8496;
     --accent: #F2735F; --accent-strong: #FF9C8A; --accent-ink: #1B0F0C; --accent-soft: #3B2421;
     --jade: #4CB894; --jade-2: #6BD0AC; --gold: #F0B94B;
     --tbc-bg: #3A3013; --tbc-ink: #F4D88E;
@@ -75,7 +76,7 @@
   color-scheme: dark;
   --bg: #12161D; --bg-2: #181D26; --surface: #1D232E; --tabbar-bg: rgba(24, 29, 38, 0.94);
   --ink: #F2ECE2; --ink-2: #CFC8BC; --muted: #9EA4AE;
-  --line: #2C3441; --line-strong: #3E4858; --rail: #364050;
+  --line: #2C3441; --line-strong: #3E4858; --rail: #364050; --control-border: #7A8496;
   --accent: #F2735F; --accent-strong: #FF9C8A; --accent-ink: #1B0F0C; --accent-soft: #3B2421;
   --jade: #4CB894; --jade-2: #6BD0AC; --gold: #F0B94B;
   --tbc-bg: #3A3013; --tbc-ink: #F4D88E;
@@ -100,7 +101,24 @@
 /* ------------------------------------------------------------------ base */
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
+/* in the accessibility tree, not on screen (screen-reader announcer) */
+.visually-hidden:where(:not(:focus-within, :active)) {
+  position: absolute !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: nowrap !important;
+}
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+/* keep focused / scrolled-to elements clear of the fixed tab bar and the sticky day bar (phone layout) */
+@media (max-width: 1023px) {
+  html { scroll-padding-bottom: calc(var(--tabbar-h) + var(--sab) + 8px); }
+  html:has(.daybar) { scroll-padding-top: calc(var(--sat) + 78px); }
+}
 body {
   margin: 0;
   background: var(--bg);
@@ -296,7 +314,9 @@ main {
 .status-back { margin: 6px 0 4px; }
 .pulse {
   width: 9px; height: 9px; border-radius: 50%; background: var(--accent);
-  animation: pulse 2s ease-out infinite;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .pulse { animation: pulse 2s ease-out infinite; }
 }
 @keyframes pulse {
   0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
@@ -536,6 +556,12 @@ main {
 }
 .suggest summary::-webkit-details-marker { display: none; }
 .suggest summary > .i { color: var(--gold); }
+/* the default triangle is hidden above, so show open/closed with a chevron right before the label */
+.suggest summary > .sum-chev { width: 16px; height: 16px; margin: 0 -4px 0 -2px; color: var(--muted); }
+.suggest[open] > summary > .sum-chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: no-preference) {
+  .suggest summary > .sum-chev { transition: transform 0.2s; }
+}
 .suggest summary span { flex: 1; display: flex; flex-direction: column; line-height: 1.3; }
 .suggest summary small { font-size: 12.5px; color: var(--muted); font-weight: 600; }
 .suggest .count {
@@ -557,6 +583,10 @@ main {
   padding: 2px; margin: -2px;
 }
 .chips::-webkit-scrollbar { display: none; }
+/* mouse / trackpad: no hidden-scrollbar row a mouse can't scroll; wrap like the desktop layout */
+@media (pointer: fine) {
+  .chips { flex-wrap: wrap; overflow: visible; }
+}
 .chip {
   flex: none; min-height: 44px; padding: 0 14px;
   border: 1px solid var(--line-strong); border-radius: 999px;
@@ -610,9 +640,10 @@ main {
   font-size: 14px; font-weight: 700; cursor: pointer;
 }
 .mark .i { width: 17px; height: 17px; }
-.mark-want[aria-pressed="true"] { background: var(--want-bg); color: var(--want-ink); border-color: transparent; }
+/* pressed: tinted background plus a full-contrast outline (the tint alone is ~1.2:1 against the card) */
+.mark-want[aria-pressed="true"] { background: var(--want-bg); color: var(--want-ink); border-color: currentColor; }
 .mark-want[aria-pressed="true"] .i { fill: currentColor; }
-.mark-done[aria-pressed="true"] { background: var(--done-bg); color: var(--done-ink); border-color: transparent; }
+.mark-done[aria-pressed="true"] { background: var(--done-bg); color: var(--done-ink); border-color: currentColor; }
 
 /* ------------------------------------------------------------------ checklist */
 .progress { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
@@ -622,7 +653,10 @@ main {
 }
 .progress-bar span {
   display: block; height: 100%; border-radius: 999px;
-  background: linear-gradient(90deg, var(--jade), var(--jade-2)); transition: width 0.3s;
+  background: linear-gradient(90deg, var(--jade), var(--jade-2));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .progress-bar span { transition: width 0.3s; }
 }
 .progress-text { font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .progress-text b { color: var(--ink); font-size: 17px; }
@@ -644,7 +678,7 @@ main {
 .check-box {
   flex: none; display: grid; place-items: center;
   width: 26px; height: 26px; border-radius: 8px;
-  border: 2px solid var(--line-strong); background: var(--surface); color: transparent;
+  border: 2px solid var(--control-border); background: var(--surface); color: transparent;
 }
 .check-box .i { width: 17px; height: 17px; stroke-width: 2.6; }
 .check input:checked + .check-box { background: var(--jade); border-color: var(--jade); color: var(--surface); }
@@ -730,7 +764,20 @@ main {
 .data-meta .sources { max-width: 560px; margin: 0 auto 10px; line-height: 1.6; }
 
 /* ------------------------------------------------------------------ taxi card, toast */
-.overlay { position: fixed; inset: 0; z-index: 100; overflow-y: auto; background: #FFFFFF; color: #111111; }
+/* Always a white sheet (also in dark mode): light native UI, and the light accent for the focus ring
+   (the dark accent is under 3:1 on white). */
+.overlay {
+  position: fixed; inset: 0; z-index: 100; overflow-y: auto; background: #FFFFFF; color: #111111;
+  color-scheme: light; --accent: #B3312A;
+}
+/* native modal <dialog>: undo the UA's centred box so it covers the screen exactly like the old div
+   (never set display on the dialog itself: that would override its closed state) */
+dialog.overlay {
+  width: auto; height: auto; max-width: none; max-height: none;
+  margin: 0; padding: 0; border: 0;
+  overscroll-behavior: contain;
+}
+dialog.overlay::backdrop { background: #FFFFFF; overflow: hidden; overscroll-behavior: contain; }
 .taxi {
   min-height: 100%; display: flex; flex-direction: column; justify-content: center; gap: 10px;
   padding: calc(var(--sat) + 72px) max(24px, env(safe-area-inset-right, 0px)) calc(var(--sab) + 40px) max(24px, env(safe-area-inset-left, 0px));
@@ -848,9 +895,12 @@ main {
   .day-layout { grid-template-columns: minmax(0, 1fr) 340px; }
 }
 
-/* ------------------------------------------------------------------ motion */
+/* ------------------------------------------------------------------ motion
+   Moving / persistent motion is opted in above under (prefers-reduced-motion: no-preference)
+   (.pulse, the progress bar, the summary chevron). The gold .flash highlight on a jumped-to card is
+   a fade, not movement, so it stays for everyone, as do colour/opacity transitions. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .btn:active, .chip:active, .mark:active, .seg-btn:active, .daychip:active { transform: none; }
 }
 
 /* ------------------------------------------------------------------ print: whole itinerary */

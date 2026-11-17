@@ -48,6 +48,79 @@
     var seen = {};
     return list.filter(function (x) { if (!x || seen[x._id]) return false; seen[x._id] = 1; return true; });
   }
+  function cssEsc(v) {
+    return window.CSS && CSS.escape ? CSS.escape(v) : String(v).replace(/["\\]/g, '\\$&');
+  }
+
+  // ------------------------------------------------------------ keep focus across re-renders
+  // Re-rendering replaces the focused button; find its replacement by the same data-* attributes
+  // so keyboard and screen-reader users keep their place.
+  var FOCUS_ATTRS = ['data-day', 'data-group', 'data-f', 'data-v', 'data-mark', 'data-food', 'data-jump',
+    'data-today', 'data-reset-checks', 'data-print', 'data-taxi', 'data-copy', 'data-check'];
+  function focusKey() {
+    var a = document.activeElement;
+    if (!a || a === document.body || !a.closest) return null;
+    var scope = a.closest('.side-status') ? '.side-status' : a.closest('#main') ? '#main' : null;
+    if (!scope) return null;
+    var sel = FOCUS_ATTRS.filter(function (k) { return a.hasAttribute(k); }).map(function (k) {
+      var v = a.getAttribute(k);
+      return v ? '[' + k + '="' + cssEsc(v) + '"]' : '[' + k + ']';
+    }).join('');
+    return sel ? scope + ' ' + sel : null;
+  }
+  function focusQuietly(el) {
+    try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
+  }
+  function restoreFocus(key) {
+    if (!key) return;
+    var a = document.activeElement;
+    if (a && a !== document.body && document.contains(a)) return; // focus is still somewhere sensible
+    var el = document.querySelector(key);
+    if (el) focusQuietly(el);
+  }
+  // move focus to a card the user just jumped to (programmatically focusable only while focused)
+  function focusTarget(el) {
+    if (!el) return;
+    el.setAttribute('tabindex', '-1');
+    el.addEventListener('blur', function () { el.removeAttribute('tabindex'); }, { once: true });
+    focusQuietly(el);
+  }
+
+  // ------------------------------------------------------------ screen-reader announcements
+  // One always-rendered, visually hidden role="status" region (a live region that is display:none
+  // when its text changes is not reliably announced).
+  var lastAnnounce = '', announceTimer = null;
+  function announcer() {
+    var el = document.getElementById('announcer');
+    if (!el) { // an older cached index.html has no announcer
+      el = document.createElement('p');
+      el.id = 'announcer'; el.className = 'visually-hidden'; el.setAttribute('role', 'status');
+      document.body.appendChild(el);
+    }
+    // visually hidden inline as well, so it holds even if an older cached style.css is in use
+    el.style.cssText = 'position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;' +
+      'clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;';
+    return el;
+  }
+  // index.html keeps the old live-region attributes on the toast and the offline bar (for an older
+  // cached app.js); this code announces through the announcer instead, so drop them here.
+  function setupAnnouncer() {
+    announcer();
+    ['toast', 'netbar'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) { el.removeAttribute('role'); el.removeAttribute('aria-live'); }
+    });
+  }
+  function announce(msg) {
+    var el = announcer();
+    // VoiceOver skips a message identical to the previous one: make a repeat differ invisibly
+    var m = msg === lastAnnounce ? msg + '\u00A0' : msg;
+    lastAnnounce = m;
+    el.textContent = '';
+    clearTimeout(announceTimer);
+    requestAnimationFrame(function () { el.textContent = m; });
+    announceTimer = setTimeout(function () { el.textContent = ''; }, 7000);
+  }
 
   // ------------------------------------------------------------ storage (never throws)
   var memory = {};
@@ -355,7 +428,14 @@
     var sig = [L.phase, L.todayIdx, ids, Math.floor(L.now / 60000), state.group, state.day, state.tab].join('|');
     if (!force && sig === lastSig) return;
     lastSig = sig;
-    $$('[data-status]').forEach(function (el) { el.innerHTML = statusHTML(L); });
+    var html = statusHTML(L);
+    $$('[data-status]').forEach(function (el) {
+      if (el.__html === html) return; // unchanged: leave the DOM (and any focus inside it) alone
+      var fk = el.contains(document.activeElement) ? focusKey() : null;
+      el.innerHTML = html;
+      el.__html = html;
+      restoreFocus(fk);
+    });
     applyLive(L);
   }
 
@@ -376,7 +456,7 @@
   }
   function linksHTML(links) {
     var list = arr(links).filter(function (x) { return x && x.url; });
-    return list.length ? '<ul class="links">' + list.map(function (x) {
+    return list.length ? '<ul class="links" role="list">' + list.map(function (x) {
       return '<li><a href="' + esc(x.url) + '" target="_blank" rel="noopener">' + esc(x.label || x.url) + icon('external') + '</a></li>';
     }).join('') + '</ul>' : '';
   }
@@ -399,7 +479,9 @@
   // ------------------------------------------------------------ view: itinerary
   function timeText(it) { return it.timeText || (it.time + (it.end ? '–' + it.end : '')); }
 
-  function stopHTML(it) {
+  // level: heading level for the stop title (3 in the day timeline, 4 inside a runner/cheer lane)
+  function stopHTML(it, level) {
+    var hl = level === 4 ? 'h4' : 'h3';
     var t = TYPES[it._type];
     var tags = [];
     if (it._group !== 'all') tags.push(tag('tag-' + it._group, esc(groupLabel(it._group))));
@@ -413,7 +495,7 @@
         '<header class="stop-head"><span class="stop-time">' + esc(timeText(it)) + '</span>' +
         '<span class="live-badge" hidden></span>' +
         '<span class="stop-type">' + t.label + (it.area ? ' · ' + esc(it.area) : '') + '</span></header>' +
-        '<h3 class="stop-title">' + esc(it.title) + '</h3>' +
+        '<' + hl + ' class="stop-title">' + esc(it.title) + '</' + hl + '>' +
         (tags.length ? '<div class="tags">' + tags.join('') + '</div>' : '') +
         (it.route ? '<p class="stop-route">' + icon('train') + '<span><b>前往</b>' + rich(it.route) + '</span></p>' : '') +
         (it.notes ? '<p class="stop-notes">' + rich(it.notes) + '</p>' : '') +
@@ -434,13 +516,14 @@
 
   function foodInlineHTML(foods, heading) {
     var marks = foodMarks();
-    return '<div class="stop-food"><p class="sf-head">' + icon('bowl') + esc(heading) + '</p><ul>' +
+    return '<div class="stop-food"><p class="sf-head">' + icon('bowl') + esc(heading) + '</p><ul role="list">' +
       foods.map(function (f) {
         var mk = marks[f._id];
         var m = mapList(f.map, f.name)[0];
         return '<li class="sf-item" data-food-id="' + esc(f._id) + '">' +
           '<a class="sf-main" href="#food/' + encodeURIComponent(f._id) + '">' +
-            '<span class="sf-name">' + esc(f.name) + (f._pick === 'organiser' ? icon('star', 'sf-star') : '') +
+            '<span class="sf-name">' + esc(f.name) +
+            (f._pick === 'organiser' ? '<svg class="i sf-star" role="img" aria-label="主辦推介"><use href="#i-star"></use></svg>' : '') +
             (hasTbc(f) ? tag('tag-tbc sf-tbc', '待確認') : '') + '</span>' +
             (f.order ? '<span class="sf-order">' + rich(f.order) + '</span>' : '') +
           '</a>' +
@@ -456,9 +539,9 @@
       '<span class="split-time">' + esc(first.time) + ' 起</span></div><div class="lanes">' +
       LANES.map(function (g) {
         var items = run.filter(function (x) { return x._group === g; });
-        return '<section class="lane lane-' + g + '"><h4 class="lane-head">' + icon(g === 'runner' ? 'flag' : 'megaphone') +
-          esc(groupLabel(g)) + '</h4>' +
-          (items.length ? '<ol class="timeline">' + items.map(stopHTML).join('') + '</ol>' : '<p class="lane-empty">跟大隊行程</p>') +
+        return '<section class="lane lane-' + g + '"><h3 class="lane-head">' + icon(g === 'runner' ? 'flag' : 'megaphone') +
+          esc(groupLabel(g)) + '</h3>' +
+          (items.length ? '<ol class="timeline" role="list">' + items.map(function (x) { return stopHTML(x, 4); }).join('') + '</ol>' : '<p class="lane-empty">跟大隊行程</p>') +
           '</section>';
       }).join('') + '</div></li>';
   }
@@ -478,11 +561,11 @@
           '同時有另一套安排（' + others + ' 項）</span><button type="button" class="btn btn-sm" data-group="all">顯示全部</button></li>');
       }
     }
-    return '<ol class="timeline">' + out.join('') + '</ol>';
+    return '<ol class="timeline" role="list">' + out.join('') + '</ol>';
   }
 
   function daybarHTML(L) {
-    return '<nav class="daybar" aria-label="揀日子">' + D.days.map(function (d) {
+    return '<div class="daybar" role="group" aria-label="揀日子">' + D.days.map(function (d) {
       var on = d._i === state.day;
       var today = L.phase === 'during' && L.todayIdx === d._i;
       return '<button type="button" class="daychip' + (on ? ' is-active' : '') + (today ? ' is-today' : '') +
@@ -490,7 +573,7 @@
         '<span class="dc-top"><span class="dc-date">' + md(d.date) + '</span><span class="dc-wd">' + weekday(d.date) + '</span>' +
         (today ? '<span class="dc-today">今日</span>' : '') + '</span>' +
         '<span class="dc-title">' + esc(d.title || '') + '</span></button>';
-    }).join('') + '</nav>';
+    }).join('') + '</div>';
   }
 
   function renderItinerary() {
@@ -524,7 +607,7 @@
     if (loose.length) html += '<section class="day-extra panel">' + foodInlineHTML(loose, '當日其他美食') + '</section>';
     if (sug.length) {
       html += '<details class="suggest day-extra"' + (window.matchMedia('(min-width: 1024px)').matches ? ' open' : '') + '>' +
-        '<summary>' + icon('bulb') + '<span>研究建議<small>未納入行程，供主辦人參考</small></span><span class="count">' + sug.length + '</span></summary><ul>' +
+        '<summary>' + icon('bulb') + icon('chevron', 'sum-chev') + '<span>研究建議<small>未納入行程，供主辦人參考</small></span><span class="count">' + sug.length + '</span></summary><ul>' +
         sug.map(function (s) {
           var o = typeof s === 'string' ? { text: s } : s;
           return '<li><p>' + rich(o.text) + '</p>' + (o.why ? '<p class="why">' + rich(o.why) + '</p>' : '') + '</li>';
@@ -555,7 +638,7 @@
     D.food.forEach(function (f) { if (marks[f._id] === 'want') nWant++; if (marks[f._id] === 'done') nDone++; });
 
     function chips(key, opts) {
-      return '<div class="chips" role="group">' + opts.map(function (o) {
+      return '<div class="chips" role="group" aria-labelledby="fl-' + key + '">' + opts.map(function (o) {
         var on = String(F[key]) === String(o[0]);
         return '<button type="button" class="chip' + (on ? ' is-on' : '') + '" data-f="' + key + '" data-v="' + esc(o[0]) + '" aria-pressed="' + on + '">' + o[1] + '</button>';
       }).join('') + '</div>';
@@ -568,9 +651,9 @@
     var html = '<header class="view-head"><p class="dh-kicker">FOOD</p><h2 class="view-title">美食清單</h2>' +
       '<p class="view-sub">共 ' + D.food.length + ' 間 · 想食 ' + nWant + ' · 食咗 ' + nDone + '</p></header>';
     html += '<div class="filters">' +
-      '<div class="filter-row"><span class="filter-label">日子</span>' + chips('day', dayOpts) + '</div>' +
-      '<div class="filter-row"><span class="filter-label">地區</span>' + chips('area', areaOpts) + '</div>' +
-      '<div class="filter-row"><span class="filter-label">標記</span>' + chips('status', statusOpts) + '</div></div>';
+      '<div class="filter-row"><span class="filter-label" id="fl-day">日子</span>' + chips('day', dayOpts) + '</div>' +
+      '<div class="filter-row"><span class="filter-label" id="fl-area">地區</span>' + chips('area', areaOpts) + '</div>' +
+      '<div class="filter-row"><span class="filter-label" id="fl-status">標記</span>' + chips('status', statusOpts) + '</div></div>';
     if (!list.length) html += '<p class="empty">冇符合篩選條件嘅美食。</p>';
     html += '<div class="food-grid">' + list.map(function (f) { return foodCardHTML(f, marks[f._id]); }).join('') + '</div>';
     return html;
@@ -595,8 +678,8 @@
       (hasTbc(f) ? '<div class="tags">' + tag('tag-tbc', '待確認') + '</div>' + tbcBlock(f.tbc) : '') +
       link +
       '<footer class="fc-foot"><div class="marks" role="group" aria-label="標記">' +
-        '<button type="button" class="mark mark-want" data-mark="want" data-food="' + esc(f._id) + '" aria-pressed="' + (mk === 'want') + '">' + icon('heart') + '想食</button>' +
-        '<button type="button" class="mark mark-done" data-mark="done" data-food="' + esc(f._id) + '" aria-pressed="' + (mk === 'done') + '">' + icon('check') + '食咗</button>' +
+        '<button type="button" class="mark mark-want" data-mark="want" data-food="' + esc(f._id) + '" aria-pressed="' + (mk === 'want') + '" aria-label="想食：' + esc(f.name) + '">' + icon('heart') + '想食</button>' +
+        '<button type="button" class="mark mark-done" data-mark="done" data-food="' + esc(f._id) + '" aria-pressed="' + (mk === 'done') + '" aria-label="食咗：' + esc(f.name) + '">' + icon('check') + '食咗</button>' +
       '</div>' + (m.length ? navButtons(m.slice(0, 1), f.name) : '') + '</footer></article>';
   }
 
@@ -706,7 +789,7 @@
       arr(d.reminders).map(textOf).forEach(function (r) { rem.push({ when: when, text: r.text, links: r.links }); });
     });
     if (rem.length) {
-      html += '<section class="info-sec"><h3 class="sec-title">' + icon('alert') + '重要提醒</h3><ul class="panel reminders">' +
+      html += '<section class="info-sec"><h3 class="sec-title">' + icon('alert') + '重要提醒</h3><ul class="panel reminders" role="list">' +
         rem.map(function (r) { return '<li' + (r.strong ? ' class="rem-strong"' : '') + '>' + (r.when ? '<span class="rem-when">' + r.when + '</span>' : '') + '<span>' + (r.title ? '<b>' + esc(r.title) + '</b>\n' : '') + rich(r.text) + linksHTML(r.links) + '</span></li>'; }).join('') + '</ul></section>';
     }
 
@@ -745,26 +828,77 @@
   }
 
   // ------------------------------------------------------------ taxi card / copy
-  function openTaxi() {
+  // Native modal <dialog> where supported (inert page, focus containment, Esc and the Android back
+  // gesture close it, focus returns to the button that opened it). Older browsers keep the div.
+  // No history entries are added for the card; a history navigation while it is open closes it (onHash).
+  var HAS_DIALOG = typeof HTMLDialogElement === 'function' && 'showModal' in HTMLDialogElement.prototype;
+  var taxiOpener = null;
+  var reloadPending = false; // new code took over while the card was open; stays set until the reload runs
+  function setupOverlay() {
+    var ov = $('#overlay');
+    if (HAS_DIALOG && ov.tagName !== 'DIALOG') {
+      var d = document.createElement('dialog');
+      d.id = 'overlay'; d.className = 'overlay';
+      d.setAttribute('aria-label', '俾司機睇');
+      // full-screen white sheet set inline, so it holds even if an older cached style.css is in use
+      d.style.cssText = 'position:fixed;top:0;right:0;bottom:0;left:0;z-index:100;width:auto;height:auto;' +
+        'max-width:none;max-height:none;margin:0;padding:0;border:0;overflow-y:auto;' +
+        'background:#FFFFFF;color:#111111;color-scheme:light;overscroll-behavior:contain;';
+      d.style.setProperty('--accent', '#B3312A');
+      ov.parentNode.replaceChild(d, ov);
+      ov = d;
+    }
+    if (ov.tagName === 'DIALOG') ov.addEventListener('close', overlayClosed);
+  }
+  // called when a new service worker takes over: reload now, or as soon as the card is closed
+  function reloadForNewCode() {
+    if (overlayOpen()) { reloadPending = true; return; }
+    location.reload();
+  }
+  function overlayOpen() {
+    var ov = $('#overlay');
+    return ov.tagName === 'DIALOG' ? ov.open : !ov.hidden;
+  }
+  function openTaxi(opener) {
     var h = D.T.hotel || {};
     var ov = $('#overlay');
-    ov.innerHTML = '<div class="taxi" role="dialog" aria-modal="true" aria-label="俾司機睇">' +
-      '<button type="button" class="icon-btn taxi-close" data-close aria-label="關閉">' + icon('close') + '</button>' +
+    var native = ov.tagName === 'DIALOG';
+    if (overlayOpen()) return;
+    taxiOpener = opener || document.activeElement; // iOS does not focus a tapped button, so take the button itself
+    ov.innerHTML = '<div class="taxi"' + (native ? '' : ' role="dialog" aria-modal="true" aria-label="俾司機睇"') + '>' +
+      '<button type="button" class="icon-btn taxi-close" data-close aria-label="關閉"' + (native ? ' autofocus' : '') + '>' + icon('close') + '</button>' +
       '<p class="taxi-lead">司機您好，請載我到：</p>' +
       '<p class="taxi-name">' + esc(h.name || '') + '</p>' +
       (h.address ? '<p class="taxi-addr">' + esc(h.address) + '</p>' : '') +
       (h.note ? '<p class="taxi-note">（' + esc(h.note) + '）</p>' : '') +
       (h.phone ? '<p class="taxi-note">電話 ' + esc(h.phone) + '</p>' : '') +
       '<p class="taxi-thanks">謝謝！</p></div>';
-    ov.hidden = false;
+    // kept deliberately (untested on iOS): stops the page behind the opaque sheet from scrolling
     document.body.classList.add('no-scroll');
-    $('.taxi-close', ov).focus();
+    if (native) {
+      try { ov.showModal(); } catch (e) { ov.setAttribute('open', ''); }
+    } else ov.hidden = false;
+    focusQuietly($('.taxi-close', ov));
   }
   function closeOverlay() {
     var ov = $('#overlay');
-    if (ov.hidden) return;
-    ov.hidden = true; ov.innerHTML = '';
+    if (!overlayOpen()) return;
+    if (ov.tagName === 'DIALOG') { ov.close(); return; } // cleanup runs in the 'close' event
+    ov.hidden = true;
+    overlayClosed();
+  }
+  function overlayClosed() {
+    var ov = $('#overlay');
+    ov.innerHTML = '';
     document.body.classList.remove('no-scroll');
+    // the browser returns focus to the opener for a native dialog; make sure it does everywhere
+    var a = document.activeElement;
+    if ((!a || a === document.body) && taxiOpener && document.contains(taxiOpener)) focusQuietly(taxiOpener);
+    taxiOpener = null;
+    // a new version of the site's code took over while the card was showing: reload now that it is
+    // closed. The flag stays set until the reload really happens; if the card was reopened in the
+    // meantime, the next close tries again.
+    if (reloadPending) setTimeout(function () { if (reloadPending && !overlayOpen()) location.reload(); }, 100);
   }
   function copyText(text) {
     function fallback() {
@@ -818,11 +952,14 @@
     if (foot) foot.textContent = '資料更新：' + (m.updated || '—');
   }
 
+  // Stored theme: absent (or a legacy "auto") = follow the system; "light"/"dark" = pinned by the user.
   function themeMode() { var t = store.get('theme', 'auto'); return THEMES[t] ? t : 'auto'; }
+  function systemDark() { return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); }
+  function renderedDark(mode) { return mode === 'dark' || (mode === 'auto' && systemDark()); }
   function applyTheme(mode) {
     var root = document.documentElement;
     if (mode === 'light' || mode === 'dark') root.setAttribute('data-theme', mode); else root.removeAttribute('data-theme');
-    var dark = mode === 'dark' || (mode === 'auto' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    var dark = renderedDark(mode);
     $$('meta[name="theme-color"]').forEach(function (el) {
       var media = el.getAttribute('media') || '';
       var isDarkMeta = media.indexOf('dark') >= 0;
@@ -832,17 +969,20 @@
     });
     var btn = $('#theme-btn');
     if (btn) {
-      btn.innerHTML = icon(THEMES[mode].icon);
-      btn.setAttribute('aria-label', '主題：' + THEMES[mode].label + '（按一下切換）');
-      btn.title = '主題：' + THEMES[mode].label;
+      // the icon shows what is on screen now; the name says what pressing it does
+      btn.innerHTML = icon(dark ? 'moon' : 'sun');
+      btn.setAttribute('aria-label', dark ? '轉淺色主題' : '轉深色主題');
+      btn.title = '主題：' + (dark ? '深色' : '淺色') + (mode === 'auto' ? '（跟隨系統）' : '');
     }
   }
-  function cycleTheme() {
-    var order = ['auto', 'light', 'dark'];
-    var next = order[(order.indexOf(themeMode()) + 1) % order.length];
-    store.set('theme', next);
+  // Two states: always switch to the opposite of what is shown. If that matches the system setting,
+  // the user is undoing their override, so forget it (follow the system again) rather than pinning it.
+  function toggleTheme() {
+    var target = renderedDark(themeMode()) ? 'light' : 'dark';
+    var next = (target === 'dark') === systemDark() ? 'auto' : target;
+    store.set('theme', next === 'auto' ? null : next);
     applyTheme(next);
-    toast('主題：' + THEMES[next].label);
+    toast('主題：' + (target === 'dark' ? '深色' : '淺色') + (next === 'auto' ? '（跟隨系統）' : ''));
   }
 
   var toastTimer = null;
@@ -851,16 +991,26 @@
     el.innerHTML = '<span>' + esc(msg) + '</span>' + (actionLabel ? '<button type="button" class="btn btn-sm">' + esc(actionLabel) + '</button>' : '');
     el.hidden = false;
     if (actionLabel) $('button', el).addEventListener('click', function () { el.hidden = true; action(); });
+    announce(actionLabel ? msg + '（可以按「' + actionLabel + '」）' : msg);
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { el.hidden = true; }, actionLabel ? 10000 : 2600);
+    var wait = actionLabel ? 10000 : 2600;
+    (function hideLater(ms) {
+      toastTimer = setTimeout(function () {
+        if (el.contains(document.activeElement)) { hideLater(1000); return; } // don't vanish under a keyboard user
+        el.hidden = true;
+      }, ms);
+    })(wait);
   }
 
+  var wasOffline = null;
   function updateNet() {
     var bar = $('#netbar');
     var off = navigator.onLine === false;
     bar.hidden = !off;
     bar.innerHTML = off ? icon('offline') + '<span>離線中 · 顯示已儲存嘅內容</span>' : '';
     document.body.classList.toggle('is-offline', off);
+    if (off !== wasOffline && (off || wasOffline !== null)) announce(off ? '離線中 · 顯示已儲存嘅內容' : '已重新連線');
+    wasOffline = off;
   }
 
   // ------------------------------------------------------------ render + routing
@@ -878,10 +1028,23 @@
       console.error(e);
       html = '<div class="fatal"><h2>呢頁顯示唔到</h2><p>可能係 data/trip.js 內容格式有問題。</p><pre>' + esc(e && e.message) + '</pre></div>';
     }
+    var fk = focusKey();
     main.innerHTML = html;
     main.setAttribute('data-view', state.tab);
     document.body.setAttribute('data-view', state.tab);
     updateLive(true);
+    restoreFocus(fk);
+  }
+
+  // Re-render the same view for a passive update (e.g. a tick made in another tab) without losing the
+  // reader's place: re-open the <details> that were open, then restore the scroll position.
+  function rerenderInPlace() {
+    var open = $$('#main details').map(function (d) { return d.open; });
+    var y = window.scrollY;
+    render();
+    var now = $$('#main details');
+    if (now.length === open.length) now.forEach(function (d, i) { d.open = open[i]; });
+    window.scrollTo(0, y);
   }
 
   function parseHash() {
@@ -891,6 +1054,7 @@
   }
 
   function onHash() {
+    closeOverlay(); // any history navigation closes the taxi card rather than changing the view behind it
     var h = parseHash();
     var changed = h.tab !== state.tab;
     state.tab = h.tab;
@@ -898,7 +1062,7 @@
     render();
     if (h.tab === 'food' && h.arg) {
       var card = document.getElementById('food-' + h.arg);
-      if (card) { card.scrollIntoView({ block: 'center' }); flash(card); }
+      if (card) { card.scrollIntoView({ block: 'center' }); flash(card); focusTarget(card); }
     } else if (changed) window.scrollTo(0, 0);
   }
 
@@ -914,7 +1078,7 @@
     if (state.tab !== 'itinerary') { state.tab = 'itinerary'; history.pushState(null, '', '#itinerary'); }
     render();
     var el = document.getElementById('stop-' + id);
-    if (el) { el.scrollIntoView({ block: 'center' }); flash($('.stop-card', el)); }
+    if (el) { el.scrollIntoView({ block: 'center' }); flash($('.stop-card', el)); focusTarget($('.stop-card', el)); }
   }
 
   function setDay(i) {
@@ -934,10 +1098,7 @@
   function bind() {
     document.addEventListener('click', function (e) {
       var el = e.target.closest('[data-day],[data-group],[data-jump],[data-mark],[data-f],[data-taxi],[data-close],[data-copy],[data-theme-toggle],[data-print],[data-reset-checks],[data-today]');
-      if (!el) {
-        if (e.target.id === 'overlay') closeOverlay();
-        return;
-      }
+      if (!el) return;
       if (el.hasAttribute('data-day')) setDay(+el.getAttribute('data-day'));
       else if (el.hasAttribute('data-group')) {
         state.group = el.getAttribute('data-group'); store.set('group', state.group);
@@ -953,12 +1114,12 @@
       } else if (el.hasAttribute('data-f')) {
         state.foodFilter[el.getAttribute('data-f')] = el.getAttribute('data-v');
         var y3 = window.scrollY; render(); window.scrollTo(0, y3);
-      } else if (el.hasAttribute('data-taxi')) openTaxi();
+      } else if (el.hasAttribute('data-taxi')) openTaxi(el);
       else if (el.hasAttribute('data-close')) closeOverlay();
       else if (el.hasAttribute('data-copy')) {
         var h = D.T.hotel || {};
         copyText(h.address ? h.name + '\n' + h.address : h.name);
-      } else if (el.hasAttribute('data-theme-toggle')) cycleTheme();
+      } else if (el.hasAttribute('data-theme-toggle')) toggleTheme();
       else if (el.hasAttribute('data-print')) { renderPrint(); window.print(); }
       else if (el.hasAttribute('data-reset-checks')) {
         if (window.confirm('確定清除呢部裝置上所有剔號？')) { store.set(CHECKS_KEY, {}); render(); }
@@ -975,7 +1136,19 @@
       refreshCheckCounts();
     });
 
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeOverlay(); });
+    // a native <dialog> handles Esc itself; only the fallback div needs this
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && $('#overlay').tagName !== 'DIALOG') closeOverlay();
+    });
+    // another tab / the installed app changed saved state: drop our in-memory copy and show theirs
+    // (otherwise this page's next write would overwrite ticks or marks made over there)
+    window.addEventListener('storage', function (e) {
+      if (e.key === null) memory = {};
+      else if (e.key.indexOf(PREFIX) === 0) delete memory[e.key.slice(PREFIX.length)];
+      else return;
+      if (e.key === null || e.key === PREFIX + 'theme') applyTheme(themeMode());
+      if (D && e.key !== PREFIX + 'theme') rerenderInPlace();
+    });
     window.addEventListener('hashchange', onHash);
     window.addEventListener('beforeprint', renderPrint);
     window.addEventListener('online', function () { updateNet(); checkData(); });
@@ -1041,7 +1214,8 @@
       if (!hadController) { hadController = true; refreshOfflineState(); return; }
       if (refreshing) return;
       refreshing = true;
-      location.reload();
+      // never yank the taxi card away while someone is showing it to a driver: reload once it is closed
+      reloadForNewCode();
     });
     navigator.serviceWorker.addEventListener('message', function (e) {
       var data = e.data || {};
@@ -1068,6 +1242,8 @@
   }
 
   function boot() {
+    setupOverlay();
+    setupAnnouncer();
     applyTheme(themeMode());
     bind();
     updateNet();
